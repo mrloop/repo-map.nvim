@@ -26,66 +26,66 @@ T['repoMap()'] = new_set()
 T['repoMap()']['works'] = function()
   -- Execute Lua code inside child process, get its result and compare with expected result
   eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src')]]), [[deps/todomvc/examples/javascript-es6/src/app.js:
-Variable: todo
-Function: Todo((name))
+let todo;
+function Todo(name) {
 
 deps/todomvc/examples/javascript-es6/src/controller.js:
-Class: Controller
-  Method: constructor((model, view))
-  Method: setView((hash))
-  Method: showAll(())
-  Method: showActive(())
-  Method: showCompleted(())
-  Method: addItem((title))
-  Method: editItem((id))
-  Method: editItemSave((id, title))
-  Method: editItemCancel((id))
-  Method: removeItem((id))
-  Method: removeCompletedItems(())
-  Method: toggleComplete((id, completed, silent))
-  Method: toggleAll((completed))
-  Method: _updateCount(())
-  Method: _filter((force))
-  Method: _updateFilter((currentPage))
+class Controller {
+    constructor(model, view) {
+    setView(hash) {
+    showAll() {
+    showActive() {
+    showCompleted() {
+    addItem(title) {
+    editItem(id) {
+    editItemSave(id, title) {
+    editItemCancel(id) {
+    removeItem(id) {
+    removeCompletedItems() {
+    toggleComplete(id, completed, silent) {
+    toggleAll(completed) {
+    _updateCount() {
+    _filter(force) {
+    _updateFilter(currentPage) {
 
 deps/todomvc/examples/javascript-es6/src/helpers.js:
-Variable: qs
-Function: dispatchEvent((event))
+const qs = (selector, scope) => {
+    function dispatchEvent(event) {
 
 deps/todomvc/examples/javascript-es6/src/model.js:
-Class: Model
-  Method: constructor((storage))
-  Method: create((title, callback))
-  Method: read((query, callback))
-  Method: update((id, data, callback))
-  Method: remove((id, callback))
-  Method: removeAll((callback))
-  Method: getCount((callback))
+class Model {
+    constructor(storage) {
+    create(title, callback) {
+    read(query, callback) {
+    update(id, data, callback) {
+    remove(id, callback) {
+    removeAll(callback) {
+    getCount(callback) {
 
 deps/todomvc/examples/javascript-es6/src/store.js:
-Variable: uniqueID
-Class: Store
-  Method: constructor((name, callback))
-  Method: find((query, callback))
-  Method: findAll((callback))
-  Method: save((updateData, callback, id))
-  Method: remove((id, callback))
-  Method: drop((callback))
+let uniqueID = 1;
+export class Store {
+    constructor(name, callback) {
+    find(query, callback) {
+    findAll(callback) {
+    save(updateData, callback, id) {
+    remove(id, callback) {
+    drop(callback) {
 
 deps/todomvc/examples/javascript-es6/src/template.js:
-Variable: htmlEscapes
-Class: Template
-  Method: show((data))
-  Method: itemCounter((activeTodos))
-  Method: clearCompletedButton((completedTodos))
+const htmlEscapes = {
+class Template {
+    show(data) {
+    itemCounter(activeTodos) {
+    clearCompletedButton(completedTodos) {
 
 deps/todomvc/examples/javascript-es6/src/view.js:
-Variable: ENTER_KEY
-Class: View
-  Method: constructor((template))
-  Method: _clearCompletedButton((completedCount, visible))
-  Method: render((viewCmd, parameter))
-  Method: bindCallback((event, handler))
+const ENTER_KEY = 13;
+export default class View {
+    constructor(template) {
+    _clearCompletedButton(completedCount, visible) {
+    render(viewCmd, parameter) {
+    bindCallback(event, handler) {
 
 ]])
 

@@ -84,63 +84,72 @@ local function get_node_text(node, source)
   return nil
 end
 
+local function get_text(nodes, source)
+  if nodes[1] then
+    local start_row, _, end_row = nodes[1]:range()
+    for _, node in ipairs(nodes) do
+      local node_start_row, _, node_end_row = node:range()
+      if start_row > node_start_row then
+        start_row = node_start_row
+      end
+      if end_row < node_end_row then
+        end_row = node_end_row
+      end
+    end
 
-local indent = 2;
+    local source_lines = split(source, "\n")
+    local output = ''
+    for i = start_row, end_row do
+      if i == start_row then
+        output = source_lines[i+1]
+      else
+        output = output .. '\n' .. source_lines[i+1]
+      end
+    end
+    return output;
+  end
+  return nil
+end
+
 -- Function to recursively traverse and print the desired nodes
 -- http://neovim.io/doc/user/treesitter.html#treesitter-node
 -- https://github.com/tree-sitter/tree-sitter
-local function print_info(node, source, context, level)
+local function print_info(node, source, context)
   context = context or {}
-  level = level or 0
 
   local node_type = node:type()
   local output = '';
 
+  local nodes = {};
+
   if node_type == 'class_declaration' then
-    -- Get and print the class name
-    local class_name_node = node:field('name')[1] -- Assumes 'name' is the correct field
-    local class_name = get_node_text(class_name_node, source)
+    nodes = {node:field('name')[1]}
     context.in_class = true;
-    output = output .. (string.rep(' ', level * indent) .. 'Class: ' .. class_name) .. '\n'
-
-  elseif node_type == 'variable_declarator' and not context.in_function and not context.in_method and not context.in_variable then
-    -- Get and print the class variable name
-    local var_name_node = node:field('name')[1]
-    local var_name = get_node_text(var_name_node, source)
-    context.in_variable = true;
-    output = output .. (string.rep(' ', level * indent) .. 'Variable: ' .. var_name) .. '\n'
-
-  elseif node_type == 'function_declaration' then
-    -- Get and print the function name and parameters
-    local func_name_node = node:field('name')[1]
-    local parameters_node = node:field('parameters')[1]
-    local func_name = get_node_text(func_name_node, source)
-    local parameters = get_node_text(parameters_node, source)
-    context.in_function = true;
-    output = output .. (string.rep(' ', level * indent) .. 'Function: ' .. func_name .. '(' .. parameters .. ')') .. '\n';
 
   elseif node_type == 'field_definition' then
-    local field_property_node = node:field('property')[1]
-    local field_property  = get_node_text(field_property_node, source)
-    local field_value_node = node:field('value')[1]
-    local field_value  = get_node_text(field_value_node, source)
-    output = output .. (string.rep(' ', level * indent) .. 'Field: ' .. field_property .. '=' .. field_value) .. '\n'
+    nodes = {node:field('property')[1], node:field('value')[1]}
+
+  elseif node_type == 'function_declaration' then
+    nodes = {node:field('name')[1], node:field('parameters')[1]}
+    context.in_function = true;
 
   elseif node_type == 'method_definition' then
-    local func_name_node = node:field('name')[1]
-    local parameters_node = node:field('parameters')[1]
-    local func_name = get_node_text(func_name_node, source)
-    local parameters = get_node_text(parameters_node, source)
+    nodes = {node:field('name')[1], node:field('parameters')[1]}
     context.in_method = true;
-    output = output .. (string.rep(' ', level * indent) .. 'Method: ' .. func_name .. '(' .. parameters .. ')') .. '\n'
 
-  else
-    level = level - 1;
+  elseif node_type == 'variable_declarator' and not context.in_function and not context.in_method and not context.in_variable then
+    nodes = {node:field('name')[1]}
+    context.in_variable = true;
+  end
+
+  local text = get_text(nodes, source)
+  if text then
+    output = output .. text .. '\n'
   end
 
   -- Recursively print child nodes
   for child in node:iter_children() do
-    output = output .. print_info(child, source, context, level + 1)
+    output = output .. print_info(child, source, context)
   end
   return output;
 end
@@ -153,6 +162,7 @@ function M.repoMap(dirpath)
       output = output .. filepath .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
     end
   end)
+  print(output)
   return output;
 end
 
