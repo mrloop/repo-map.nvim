@@ -39,7 +39,7 @@ local function parse_file(filepath)
     if ok then
       local tree = parser:parse()[1]
       local node = tree:root()
-      return { node = node, source = source };
+      return { node = node, source = source, language = language, filepath = filepath };
     else
       print('parser error', parser)
     end
@@ -154,16 +154,141 @@ local function print_info(node, source, context)
   return output;
 end
 
-function M.repoMap(dirpath)
+local function process_file(filepath)
+  local parsed = parse_file(filepath)
+  if parsed and parsed.node then
+    print(print_info(parsed.node, parsed.source))
+  end
+end
+
+local query_string = [[
+  ;; Query to capture class definitions, method definitions, and method calls
+  (class_declaration name: (identifier) @class_name)
+  (method_definition name: (property_identifier) @method_name)
+  (function_declaration name: (identifier) @function_name)
+  (call_expression function: (identifier) @method_call)
+  (call_expression function: (member_expression property: (property_identifier) @method_call))
+]]
+
+local function array_contains(arr, val)
+  for i = 1, #arr do
+    if arr[i] == val then
+      return true
+    end
+  end
+  return false
+end
+
+local function find_first_parent(node, type)
+  -- Traverse the AST upwards
+  while node do
+    -- Check if the node type is 'class_declaration'
+    if node:type() == type then
+      return node
+    end
+    node = node:parent()
+  end
+  return nil
+end
+
+local function collect_usage(parsed, usage)
+  local query = ts.query.parse(parsed.language, query_string);
+
+  for id, node, _ in query:iter_captures(parsed.node, parsed.source, 0, -1) do
+    local name = ts.get_node_text(node, parsed.source)
+    local capture_name = query.captures[id]
+
+    if capture_name == 'class_name' then
+      usage:add_class(name, parsed.filepath)
+
+    elseif  capture_name == "method_name" then
+      local class_name = 'nil'
+      local class_node = find_first_parent(node, 'class_declaration')
+      if class_node then
+        class_name = get_node_text(class_node:field('name')[1], parsed.source) or 'nil';
+      end
+      usage:add_method(class_name, class_node, name, node, parsed.filepath)
+
+    elseif capture_name == "function_call" or capture_name == "method_call" then
+      usage:count(name)
+     end
+   end
+end
+
+function M.repoMap(dirpath, max_tokens)
   local output = '';
+  local usage = Usage:new();
   iterate_files_in_dir(dirpath, function(filepath)
     local parsed = parse_file(filepath)
     if parsed and parsed.node then
       output = output .. filepath .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
+      collect_usage(parsed, usage)
     end
   end)
-  print(output)
+
+-- iterate over files and count usage of methods
+--    methods with the same name in different classes will be counted against each class
+--    if class for method not yet record put in the __unclassified bucket
+-- sort list, interate over files in list and print classes.
+--
+-- we need to reference count by different class name and by method name
+--
+-- method_to_classes[method] = {};
+-- class_defs
+
+  -- print(output)
+  print(vim.inspect(usage))
   return output;
 end
+
+Usage = {}
+
+function Usage:new()
+  local o = {
+    counts = {},
+    -- default nil to collect yet to be seen classes / methods
+    class_defs = { },
+    method_to_classes = { },
+  }
+
+  setmetatable(o, self)
+  self.__index = self
+  return o;
+end
+
+function Usage:count (method_name)
+  self.counts[method_name] = (self.counts[method_name] or 0) + 1
+  local class_names = self.method_to_classes[method_name];
+
+  --print('method_to_classes:' .. vim.inspect(self.method_to_classes));
+  --print('class_names['..  method_name .. ']:' .. vim.inspect(class_names));
+  --print('count: ' .. method_name)
+  if class_names then
+    for _, class_name in ipairs(class_names) do
+      self.class_defs[class_name].usage = self.class_defs[class_name].usage + 1
+    end
+  end
+end
+
+function Usage:add_class (name, filepath)
+  self.class_defs[name] = self.class_defs[name] or { name = name, methods = {}, usage = 0, filepath = filepath }
+end
+
+function Usage:add_method (class_name, class_node, name, node, filepath)
+  self.counts[name] = self.counts[name] or 0
+  if not self.method_to_classes[name] then
+    self.method_to_classes[name] = {class_name}
+  elseif not array_contains(self.method_to_classes[name], class_name) then
+    self.method_to_classes[name][#self.method_to_classes[name] + 1] = class_name
+  end
+
+  if not self.class_defs[class_name] then
+    self.class_defs[class_name] = { name = class_name, methods = {}, usage = self.counts[name], filepath = filepath }
+  end
+  --print('self.counts['.. name ..']:' .. self.counts[name])
+  self.class_defs[class_name].methods[#self.class_defs[class_name].methods + 1] = name
+  self.class_defs[class_name].usage = self.class_defs[class_name].usage + self.counts[name]
+end
+
 
 return M
