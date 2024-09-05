@@ -6,7 +6,7 @@ local ts = vim.treesitter;
 
 local M = {}
 
-local function iterate_files_in_dir(directory, callback)
+local function iterate_file_paths_in_dir(directory, callback)
   local handle = vim.loop.fs_scandir(vim.fn.expand(directory))
   if not handle then return end
 
@@ -17,7 +17,7 @@ local function iterate_files_in_dir(directory, callback)
     local full_path = directory .. '/' .. name
     if type == 'directory' and name ~= '.git' then
       -- Recursively iterate through the subdirectory
-      iterate_files_in_dir(full_path, callback)
+      iterate_file_paths_in_dir(full_path, callback)
     elseif type == 'file' then
       -- Process the file (e.g., print the file path)
       callback(full_path);
@@ -25,21 +25,21 @@ local function iterate_files_in_dir(directory, callback)
   end
 end
 
-local function parse_file(filepath)
-  local file = io.open(filepath, 'r')
+local function parse_file(file_path)
+  local file = io.open(file_path, 'r')
   if not file then
-    error('Could not open file: ' .. filepath)
+    error('Could not open file: ' .. file_path)
   end
   local source = file:read('*all')
   file:close()
 
-  local language = vim.filetype.match({ filename = filepath })
+  local language = vim.filetype.match({ filename = file_path })
   if language then
     local ok, parser = pcall(ts.get_string_parser,source, language);
     if ok then
       local tree = parser:parse()[1]
       local node = tree:root()
-      return { node = node, source = source, language = language, filepath = filepath };
+      return { node = node, source = source, language = language, file_path = file_path };
     else
       print('parser error', parser)
     end
@@ -71,17 +71,6 @@ local function split(inputstr, sep)
   end
 
   return t
-end
-
--- Helper function to extract the text of a node, considering multiple lines
-local function get_node_text(node, source)
-  if node then
-    local start_row, start_col, end_row, end_col = node:range()
-    -- Single-line node
-    local lines = split(source, "\n")
-    return lines[start_row + 1]:sub(start_col + 1, end_col)
-  end
-  return nil
 end
 
 local function get_text(nodes, source)
@@ -154,16 +143,14 @@ local function print_info(node, source, context)
   return output;
 end
 
-local function process_file(filepath)
-  local parsed = parse_file(filepath)
+local function process_file(file_path)
+  local parsed = parse_file(file_path)
   if parsed and parsed.node then
     print(print_info(parsed.node, parsed.source))
   end
 end
 
 local query_string = [[
-  ;; Query to capture class definitions, method definitions, and method calls
-  (class_declaration name: (identifier) @class_name)
   (method_definition name: (property_identifier) @method_name)
   (function_declaration name: (identifier) @function_name)
   (call_expression function: (identifier) @method_call)
@@ -195,22 +182,13 @@ local function collect_usage(parsed, usage)
   local query = ts.query.parse(parsed.language, query_string);
 
   for id, node, _ in query:iter_captures(parsed.node, parsed.source, 0, -1) do
-    local name = ts.get_node_text(node, parsed.source)
+    local method_name = ts.get_node_text(node, parsed.source)
     local capture_name = query.captures[id]
 
-    if capture_name == 'class_name' then
-      usage:add_class(name, parsed.filepath)
-
-    elseif  capture_name == "method_name" then
-      local class_name = 'nil'
-      local class_node = find_first_parent(node, 'class_declaration')
-      if class_node then
-        class_name = get_node_text(class_node:field('name')[1], parsed.source) or 'nil';
-      end
-      usage:add_method(class_name, class_node, name, node, parsed.filepath)
-
+    if capture_name == "method_name" then
+      usage:add_method(method_name, parsed)
     elseif capture_name == "function_call" or capture_name == "method_call" then
-      usage:count(name)
+      usage:count(method_name)
      end
    end
 end
@@ -218,26 +196,18 @@ end
 function M.repoMap(dirpath, max_tokens)
   local output = '';
   local usage = Usage:new();
-  iterate_files_in_dir(dirpath, function(filepath)
-    local parsed = parse_file(filepath)
+  iterate_file_paths_in_dir(dirpath, function(file_path)
+    local parsed = parse_file(file_path)
     if parsed and parsed.node then
-      output = output .. filepath .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
+      output = output .. file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
       collect_usage(parsed, usage)
     end
   end)
 
--- iterate over files and count usage of methods
---    methods with the same name in different classes will be counted against each class
---    if class for method not yet record put in the __unclassified bucket
--- sort list, interate over files in list and print classes.
---
--- we need to reference count by different class name and by method name
---
--- method_to_classes[method] = {};
--- class_defs
-
-  -- print(output)
   print(vim.inspect(usage))
+
+  -- iterate over usage file_paths by methods_per_byte
+
   return output;
 end
 
@@ -247,10 +217,9 @@ function Usage:new()
   local o = {
     counts = {},
     -- default nil to collect yet to be seen classes / methods
-    class_defs = { },
-    method_to_classes = { },
+    file_paths = { },
+    method_to_file_paths = { },
   }
-
   setmetatable(o, self)
   self.__index = self
   return o;
@@ -258,37 +227,39 @@ end
 
 function Usage:count (method_name)
   self.counts[method_name] = (self.counts[method_name] or 0) + 1
-  local class_names = self.method_to_classes[method_name];
+  local file_paths = self.method_to_file_paths[method_name];
 
-  --print('method_to_classes:' .. vim.inspect(self.method_to_classes));
-  --print('class_names['..  method_name .. ']:' .. vim.inspect(class_names));
-  --print('count: ' .. method_name)
-  if class_names then
-    for _, class_name in ipairs(class_names) do
-      self.class_defs[class_name].usage = self.class_defs[class_name].usage + 1
+  if file_paths then
+    for _, file_path in ipairs(file_paths) do
+      local record = self.file_paths[file_path]
+      record.usage = record.usage + 1
+      record.methods_per_byte = record.usage / record.size
     end
   end
 end
 
-function Usage:add_class (name, filepath)
-  self.class_defs[name] = self.class_defs[name] or { name = name, methods = {}, usage = 0, filepath = filepath }
-end
-
-function Usage:add_method (class_name, class_node, name, node, filepath)
-  self.counts[name] = self.counts[name] or 0
-  if not self.method_to_classes[name] then
-    self.method_to_classes[name] = {class_name}
-  elseif not array_contains(self.method_to_classes[name], class_name) then
-    self.method_to_classes[name][#self.method_to_classes[name] + 1] = class_name
+function Usage:add_method (method_name, parsed)
+  local file_path = parsed.file_path;
+  self.counts[method_name] = self.counts[method_name] or 0
+  if not self.method_to_file_paths[method_name] then
+    self.method_to_file_paths[method_name] = {file_path}
+  elseif not array_contains(self.method_to_file_paths[method_name], file_path) then
+    self.method_to_file_paths[method_name][#self.method_to_file_paths[method_name] + 1] = file_path
   end
 
-  if not self.class_defs[class_name] then
-    self.class_defs[class_name] = { name = class_name, methods = {}, usage = self.counts[name], filepath = filepath }
+  if not self.file_paths[file_path] then
+    local size = string.len(parsed.source)
+    self.file_paths[file_path] = {
+      file_path = file_path,
+      methods = {},
+      methods_per_byte = self.counts[method_name] / size,
+      size = size,
+      usage = self.counts[method_name],
+    }
   end
-  --print('self.counts['.. name ..']:' .. self.counts[name])
-  self.class_defs[class_name].methods[#self.class_defs[class_name].methods + 1] = name
-  self.class_defs[class_name].usage = self.class_defs[class_name].usage + self.counts[name]
+  self.file_paths[file_path].methods[#self.file_paths[file_path].methods + 1] = method_name
+  self.file_paths[file_path].usage = self.file_paths[file_path].usage + self.counts[method_name]
+  self.file_paths[file_path].methods_per_byte = self.file_paths[file_path].usage / self.file_paths[file_path].size
 end
-
 
 return M
