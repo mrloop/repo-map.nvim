@@ -193,20 +193,44 @@ local function collect_usage(parsed, usage)
    end
 end
 
+local function sort_by_field(tbl, field)
+  local keys = {}
+  for key in pairs(tbl) do
+    table.insert(keys, key)
+  end
+
+  -- Sort the keys based on the field in the associated value
+  table.sort(keys, function(a, b)
+    return tbl[a][field] > tbl[b][field]
+  end)
+
+  -- Iterator function
+  local i = 0
+  return function()
+    i = i + 1
+    if i <= #keys then
+      local key = keys[i]
+      return key, tbl[key]
+    end
+  end
+end
+
 function M.repoMap(dirpath, max_tokens)
-  local output = '';
   local usage = Usage:new();
   iterate_file_paths_in_dir(dirpath, function(file_path)
     local parsed = parse_file(file_path)
     if parsed and parsed.node then
-      output = output .. file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
       collect_usage(parsed, usage)
     end
   end)
 
-  print(vim.inspect(usage))
-
-  -- iterate over usage file_paths by methods_per_byte
+  local output = '';
+  for file_path in sort_by_field(usage.file_paths, 'methods_per_byte') do
+    local parsed = parse_file(file_path)
+    if parsed and parsed.node then
+      output = output .. file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
+    end
+  end
 
   return output;
 end

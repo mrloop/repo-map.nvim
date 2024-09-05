@@ -25,9 +25,24 @@ T['repoMap()'] = new_set()
 
 T['repoMap()']['works'] = function()
   -- Execute Lua code inside child process, get its result and compare with expected result
-  eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src')]]), [[deps/todomvc/examples/javascript-es6/src/app.js:
-let todo;
-function Todo(name) {
+  eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src')]]), [[
+deps/todomvc/examples/javascript-es6/src/model.js:
+class Model {
+    constructor(storage) {
+    create(title, callback) {
+    read(query, callback) {
+    update(id, data, callback) {
+    remove(id, callback) {
+    removeAll(callback) {
+    getCount(callback) {
+
+deps/todomvc/examples/javascript-es6/src/view.js:
+const ENTER_KEY = 13;
+export default class View {
+    constructor(template) {
+    _clearCompletedButton(completedCount, visible) {
+    render(viewCmd, parameter) {
+    bindCallback(event, handler) {
 
 deps/todomvc/examples/javascript-es6/src/controller.js:
 class Controller {
@@ -48,20 +63,6 @@ class Controller {
     _filter(force) {
     _updateFilter(currentPage) {
 
-deps/todomvc/examples/javascript-es6/src/helpers.js:
-const qs = (selector, scope) => {
-    function dispatchEvent(event) {
-
-deps/todomvc/examples/javascript-es6/src/model.js:
-class Model {
-    constructor(storage) {
-    create(title, callback) {
-    read(query, callback) {
-    update(id, data, callback) {
-    remove(id, callback) {
-    removeAll(callback) {
-    getCount(callback) {
-
 deps/todomvc/examples/javascript-es6/src/store.js:
 let uniqueID = 1;
 export class Store {
@@ -78,14 +79,6 @@ class Template {
     show(data) {
     itemCounter(activeTodos) {
     clearCompletedButton(completedTodos) {
-
-deps/todomvc/examples/javascript-es6/src/view.js:
-const ENTER_KEY = 13;
-export default class View {
-    constructor(template) {
-    _clearCompletedButton(completedCount, visible) {
-    render(viewCmd, parameter) {
-    bindCallback(event, handler) {
 
 ]])
 
