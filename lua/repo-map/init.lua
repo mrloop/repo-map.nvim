@@ -211,6 +211,16 @@ local function sort_by_field(tbl, field)
   end
 end
 
+local TOKENS_PER_WORD_ESTIMATE = 2;
+
+local function estimate_tokens(source)
+  local count = 0
+  for _ in string.gmatch(source, "[^%s,()%[%]]+") do
+    count = count + 1
+  end
+  return count * TOKENS_PER_WORD_ESTIMATE;
+end
+
 function M.repoMap(dirpath, max_tokens)
   local usage = Usage:new();
   iterate_file_paths_in_dir(dirpath, function(file_path)
@@ -221,10 +231,16 @@ function M.repoMap(dirpath, max_tokens)
   end)
 
   local output = '';
+  local estimated_token_total = 0;
   for file_path in sort_by_field(usage.file_paths, 'methods_per_byte') do
     local parsed = parse_file(file_path)
     if parsed and parsed.node then
-      output = output .. file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
+      local new_output = file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
+      estimated_token_total = estimated_token_total + estimate_tokens(new_output)
+      if max_tokens and estimated_token_total > max_tokens then
+        return output
+      end
+      output = output .. new_output
     end
   end
 

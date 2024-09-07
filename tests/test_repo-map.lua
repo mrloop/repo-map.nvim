@@ -24,7 +24,6 @@ local T = new_set({
 T['repoMap()'] = new_set()
 
 T['repoMap()']['works'] = function()
-  -- Execute Lua code inside child process, get its result and compare with expected result
   eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src')]]), [[
 deps/todomvc/examples/javascript-es6/src/model.js:
 class Model {
@@ -81,7 +80,29 @@ class Template {
     clearCompletedButton(completedTodos) {
 
 ]])
+end
 
+T['repoMap()']['max_tokens'] = function()
+  eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src', 200)]]), [[
+deps/todomvc/examples/javascript-es6/src/model.js:
+class Model {
+    constructor(storage) {
+    create(title, callback) {
+    read(query, callback) {
+    update(id, data, callback) {
+    remove(id, callback) {
+    removeAll(callback) {
+    getCount(callback) {
+
+deps/todomvc/examples/javascript-es6/src/view.js:
+const ENTER_KEY = 13;
+export default class View {
+    constructor(template) {
+    _clearCompletedButton(completedCount, visible) {
+    render(viewCmd, parameter) {
+    bindCallback(event, handler) {
+
+]])
 end
 
 return T;
