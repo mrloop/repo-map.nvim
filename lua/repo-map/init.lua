@@ -1,7 +1,3 @@
--- https://aider.chat/2023/10/22/repomap.html
--- https://github.com/paul-gauthier/aider/blob/d0ebc7a810f2fbc82bc86f1fafbc90b6d0397b9b/aider/website/docs/repomap.md
--- https://github.com/paul-gauthier/aider/blob/7b2379c7c20efdf7a8d4a5e12d4a9c81162b7a70/aider/repomap.py#L29
-
 local ts = vim.treesitter;
 
 local M = {}
