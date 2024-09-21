@@ -2,24 +2,116 @@ local ts = vim.treesitter;
 
 local M = {}
 
-local function iterate_file_paths_in_dir(directory, callback)
-  local handle = vim.loop.fs_scandir(vim.fn.expand(directory))
+local gitignore_patterns = nil
+
+local function get_git_root()
+  local git_root = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
+  if git_root == nil or git_root == "" then
+    return nil -- Not a Git repository
+  end
+  return git_root
+end
+
+local function load_gitignore_file(filepath)
+  local patterns = {}
+
+  local stat = vim.loop.fs_stat(filepath)
+  if not stat then
+    return patterns
+  end
+
+  local file = io.open(filepath, "r")
+  if not file then
+    return patterns
+  end
+
+  for line in file:lines() do
+    line = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if not line:match("^#") and line ~= "" then
+      line = line:gsub("%*", ".*")
+      table.insert(patterns, line)
+    end
+  end
+
+  file:close()
+  return patterns
+end
+
+local function load_gitignore_patterns()
+  local patterns = {}
+
+  local git_root = get_git_root()
+  if git_root then
+    local local_gitignore = git_root .. "/.gitignore"
+    local local_patterns = load_gitignore_file(local_gitignore)
+    vim.list_extend(patterns, local_patterns)
+  end
+
+  local global_gitignore_path = vim.fn.systemlist("git config --get core.excludesFile")[1]
+  if global_gitignore_path == nil or global_gitignore_path == "" then
+    global_gitignore_path = vim.fn.expand("~/.gitignore_global")
+  end
+
+  local global_patterns = load_gitignore_file(global_gitignore_path)
+  vim.list_extend(patterns, global_patterns)
+
+  return patterns
+end
+
+local function is_file_in_gitignore(filename)
+  if not gitignore_patterns then
+    gitignore_patterns = load_gitignore_patterns()
+  end
+
+  for _, pattern in ipairs(gitignore_patterns) do
+    if filename:match(pattern) then
+      return true
+    end
+  end
+
+  return false
+end
+
+local function iterate_file_paths_in_dir(directory, callback, path)
+  path = path or ''
+  local current_path = directory .. path
+  local handle = vim.loop.fs_scandir(vim.fn.expand(current_path))
   if not handle then return end
 
   while true do
     local name, type = vim.loop.fs_scandir_next(handle)
     if not name then break end
 
-    local full_path = directory .. '/' .. name
-    if type == 'directory' and name ~= '.git' then
-      -- Recursively iterate through the subdirectory
-      iterate_file_paths_in_dir(full_path, callback)
-    elseif type == 'file' then
-      -- Process the file (e.g., print the file path)
-      callback(full_path);
+    local relative_path = path .. '/' .. name
+    if not is_file_in_gitignore(relative_path) then
+      if type == 'directory' and name ~= '.git' then
+        -- Recursively iterate through the subdirectory
+        iterate_file_paths_in_dir(directory, callback, relative_path)
+      elseif type == 'file' then
+        -- Process the file (e.g., print the file path)
+        callback(directory .. relative_path)
+      end
     end
   end
 end
+
+local function array_contains(arr, val)
+  for i = 1, #arr do
+    if arr[i] == val then
+      return true
+    end
+  end
+  return false
+end
+
+local function getFileModificationTime(filePath)
+  local f = assert(io.popen("stat -c %Y " .. filePath, "r"))
+  local lastModified = f:read("*number")
+  f:close()
+  return lastModified;
+end
+
+local dont_parse = {};
 
 local function parse_file(file_path)
   local file = io.open(file_path, 'r')
@@ -30,14 +122,14 @@ local function parse_file(file_path)
   file:close()
 
   local language = vim.filetype.match({ filename = file_path })
-  if language then
-    local ok, parser = pcall(ts.get_string_parser,source, language);
+  if language and not array_contains(dont_parse, language) then
+    local ok, parser = pcall(ts.get_string_parser, source, language);
     if ok then
       local tree = parser:parse()[1]
       local node = tree:root()
-      return { node = node, source = source, language = language, file_path = file_path };
+      return { node = node, source = source, language = language, file_path = file_path, modified = getFileModificationTime(file_path) };
     else
-      print('parser error', parser)
+      table.insert(dont_parse, language);
     end
   end
 end
@@ -153,15 +245,6 @@ local query_string = [[
   (call_expression function: (member_expression property: (property_identifier) @method_call))
 ]]
 
-local function array_contains(arr, val)
-  for i = 1, #arr do
-    if arr[i] == val then
-      return true
-    end
-  end
-  return false
-end
-
 local function find_first_parent(node, type)
   -- Traverse the AST upwards
   while node do
@@ -175,18 +258,24 @@ local function find_first_parent(node, type)
 end
 
 local function collect_usage(parsed, usage)
-  local query = ts.query.parse(parsed.language, query_string);
+  if not array_contains(dont_parse, parsed.language) then
+    local ok, query = pcall(ts.query.parse, parsed.language, query_string)
 
-  for id, node, _ in query:iter_captures(parsed.node, parsed.source, 0, -1) do
-    local method_name = ts.get_node_text(node, parsed.source)
-    local capture_name = query.captures[id]
+    if ok then
+      for id, node, _ in query:iter_captures(parsed.node, parsed.source, 0, -1) do
+        local method_name = ts.get_node_text(node, parsed.source)
+        local capture_name = query.captures[id]
 
-    if capture_name == "method_name" then
-      usage:add_method(method_name, parsed)
-    elseif capture_name == "function_call" or capture_name == "method_call" then
-      usage:count(method_name)
-     end
-   end
+        if capture_name == "method_name" then
+          usage:add_method(method_name, parsed)
+        elseif capture_name == "function_call" or capture_name == "method_call" then
+          usage:count(method_name)
+         end
+       end
+    else
+      table.insert(dont_parse, parsed.language)
+    end
+  end
 end
 
 local function sort_by_field(tbl, field)
