@@ -269,9 +269,9 @@ local function collect_usage(parsed, usage)
         if capture_name == "method_name" then
           usage:add_method(method_name, parsed)
         elseif capture_name == "function_call" or capture_name == "method_call" then
-          usage:count(method_name)
-         end
-       end
+          usage:count(method_name, parsed.file_path)
+        end
+      end
     else
       table.insert(dont_parse, parsed.language)
     end
@@ -340,7 +340,7 @@ end
 
 function Usage:new()
   local o = {
-    counts = {},
+    counts = {}, -- { method_name { file_name: value }
     -- default nil to collect yet to be seen classes / methods
     file_paths = { },
     method_to_file_paths = { },
@@ -350,8 +350,12 @@ function Usage:new()
   return o;
 end
 
-function Usage:count (method_name)
-  self.counts[method_name] = (self.counts[method_name] or 0) + 1
+function Usage:count (method_name, callee_file_path)
+  if not self.counts[method_name] then
+    self.counts[method_name] = { [callee_file_path] =  1 }
+  else
+    self.counts[method_name][callee_file_path] = (self.counts[method_name][callee_file_path] or 0) + 1
+  end
   local file_paths = self.method_to_file_paths[method_name];
 
   if file_paths then
@@ -365,26 +369,37 @@ end
 
 function Usage:add_method (method_name, parsed)
   local file_path = parsed.file_path;
-  self.counts[method_name] = self.counts[method_name] or 0
+  if not self.counts[method_name] then
+    self.counts[method_name] = {}
+  end
   if not self.method_to_file_paths[method_name] then
     self.method_to_file_paths[method_name] = {file_path}
   elseif not array_contains(self.method_to_file_paths[method_name], file_path) then
     self.method_to_file_paths[method_name][#self.method_to_file_paths[method_name] + 1] = file_path
   end
 
+  local total_count = self:total_count_for_method(method_name)
   if not self.file_paths[file_path] then
     local size = string.len(parsed.source)
     self.file_paths[file_path] = {
       file_path = file_path,
       methods = {},
-      methods_per_byte = self.counts[method_name] / size,
+      methods_per_byte = total_count / size,
       size = size,
-      usage = self.counts[method_name],
+      usage = total_count,
     }
   end
   self.file_paths[file_path].methods[#self.file_paths[file_path].methods + 1] = method_name
-  self.file_paths[file_path].usage = self.file_paths[file_path].usage + self.counts[method_name]
+  self.file_paths[file_path].usage = self.file_paths[file_path].usage + total_count
   self.file_paths[file_path].methods_per_byte = self.file_paths[file_path].usage / self.file_paths[file_path].size
+end
+
+function Usage:total_count_for_method(method_name)
+  local total = 0
+  for k, v in pairs(self.counts[method_name]) do
+    total = total + self.counts[method_name][k]
+  end
+  return total
 end
 
 function Usage:serialize(indent)

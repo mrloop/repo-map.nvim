@@ -117,10 +117,10 @@ T['Usage'] = new_set()
 T['Usage']['save and load'] = function()
   local file_path = tmp_file_path()
   local usage = M.Usage:new()
-  usage:count('my_method')
+  usage:count('my_method', 'my_test_file.lua')
   usage:save(file_path)
   local usageFromFile = M.Usage.load(file_path)
-  eq(1, usageFromFile.counts['my_method'])
+  eq({ ['my_test_file.lua'] = 1}, usageFromFile.counts['my_method'])
 end
 
 return T;
