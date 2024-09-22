@@ -310,7 +310,9 @@ local function estimate_tokens(source)
   return count * TOKENS_PER_WORD_ESTIMATE;
 end
 
-function M.repoMap(dirpath, max_tokens)
+local Usage = {}
+
+local function repoMap(dirpath, max_tokens)
   local usage = Usage:new();
   iterate_file_paths_in_dir(dirpath, function(file_path)
     local parsed = parse_file(file_path)
@@ -335,8 +337,6 @@ function M.repoMap(dirpath, max_tokens)
 
   return output;
 end
-
-Usage = {}
 
 function Usage:new()
   local o = {
@@ -387,4 +387,72 @@ function Usage:add_method (method_name, parsed)
   self.file_paths[file_path].methods_per_byte = self.file_paths[file_path].usage / self.file_paths[file_path].size
 end
 
-return M
+function Usage:serialize(indent)
+  indent = indent or ""
+  local result = "{\n"
+  local nextIndent = indent .. "  "
+
+  for k, v in pairs(self) do
+    -- Skip the metatable to avoid serializing class metadata
+    if k ~= "__index" then
+      local key
+      if type(k) == "string" then
+        key = string.format("[%q]", k)
+      else
+        key = "[" .. tostring(k) .. "]"
+      end
+
+      local value
+      if type(v) == "table" then
+        value = Usage.serialize(v, nextIndent)
+      elseif type(v) == "string" then
+        value = string.format("%q", v)
+      else
+        value = tostring(v)
+      end
+
+      result = result .. nextIndent .. key .. " = " .. value .. ",\n"
+    end
+  end
+
+  result = result .. indent .. "}"
+  return result
+end
+
+function Usage:deserialize (data)
+  local fnc, err = load('return' .. data);
+  if not fnc then
+    error("Failed to deserialize Usage: " .. err);
+  end
+  return fnc();
+end
+
+-- Usage.load('my_file_path');
+function Usage.load(file_path)
+  local usage = Usage:new();
+  local file = io.open(file_path, 'r')
+  if file then
+    local data = file:read('*all')
+    file:close();
+    local result = usage:deserialize(data);
+
+    usage.counts = result.counts;
+    usage.file_paths = result.file_paths;
+    usage.method_to_file_paths = {}
+  end
+  return usage;
+end
+
+function Usage:save(file_path)
+  local data = self:serialize();
+  local file = io.open(file_path, 'w')
+  if file then
+    file:write(data)
+    file:close()
+  end
+end
+
+return {
+  repoMap = repoMap,
+  Usage = Usage,
+}

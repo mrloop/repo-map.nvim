@@ -105,4 +105,22 @@ export default class View {
 ]])
 end
 
+local M = require('repo-map')
+local function tmp_file_path()
+  local base_filename = os.tmpname()
+  local random_suffix = math.random(1000000, 9999999)
+  return base_filename .. "_" .. random_suffix
+end
+
+T['Usage'] = new_set()
+
+T['Usage']['save and load'] = function()
+  local file_path = tmp_file_path()
+  local usage = M.Usage:new()
+  usage:count('my_method')
+  usage:save(file_path)
+  local usageFromFile = M.Usage.load(file_path)
+  eq(1, usageFromFile.counts['my_method'])
+end
+
 return T;
