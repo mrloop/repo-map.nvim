@@ -104,8 +104,11 @@ local function array_contains(arr, val)
   return false
 end
 
+local isMac = vim.loop.os_uname().sysname == "Darwin"
+
 local function getFileModificationTime(filePath)
-  local f = assert(io.popen("stat -c %Y " .. filePath, "r"))
+  local statCmd = isMac and "stat -f %m " or "stat -c %Y "
+  local f = assert(io.popen(statCmd .. filePath, "r"))
   local lastModified = f:read("*number")
   f:close()
   return lastModified;
