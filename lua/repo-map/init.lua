@@ -272,7 +272,7 @@ local function collect_usage(parsed, usage)
         if capture_name == "method_name" then
           usage:add_method(method_name, parsed)
         elseif capture_name == "function_call" or capture_name == "method_call" then
-          usage:count(method_name)
+          usage:count(method_name, parsed)
          end
        end
     else
@@ -315,18 +315,30 @@ end
 
 local Usage = {}
 
-local function repoMap(dirpath, max_tokens)
+local function usageFor(dirpath)
   local usage = Usage:new();
   iterate_file_paths_in_dir(dirpath, function(file_path)
+    local modified = getFileModificationTime(file_path)
     local parsed = parse_file(file_path)
+    local size = 0
+
     if parsed and parsed.node then
+      usage:add_file(file_path, string.len(parsed.source), modified)
       collect_usage(parsed, usage)
+    else
+      usage:add_file(file_path, size, modified)
     end
   end)
+  return usage;
+end
+
+local function repoMap(dirpath, max_tokens)
+  local usage = usageFor(dirpath)
 
   local output = '';
   local estimated_token_total = 0;
   for file_path in sort_by_field(usage.file_paths, 'methods_per_byte') do
+    print(file_path .. usage.file_paths[file_path].methods_per_byte);
     local parsed = parse_file(file_path)
     if parsed and parsed.node then
       local new_output = file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
@@ -353,15 +365,31 @@ function Usage:new()
   return o;
 end
 
-function Usage:count (method_name)
-  self.counts[method_name] = (self.counts[method_name] or 0) + 1
-  local file_paths = self.method_to_file_paths[method_name];
+-- add empty file_path entry
+function Usage:add_file(file_path, size, modified)
+  self.file_paths[file_path] = {
+    counts = {}, -- invoked method calls from this file
+    methods = {}, -- methods declared in this file
+    methods_per_byte = 0,
+    modified = modified,
+    size = size,
+    usage = 0, -- total methods call for methods declared in this file, could be derived.
+  }
+end
 
+function Usage:count (method_name, parsed)
+  self.counts[method_name] = (self.counts[method_name] or 0) + 1
+
+  local record = self.file_paths[parsed.file_path]
+  record.counts[method_name] = (record.counts[method_name] or 0) + 1
+
+  local file_paths = self.method_to_file_paths[method_name];
   if file_paths then
     for _, file_path in ipairs(file_paths) do
-      local record = self.file_paths[file_path]
-      record.usage = record.usage + 1
-      record.methods_per_byte = record.usage / record.size
+      local file = self.file_paths[file_path]
+      file.counts[method_name] = (file.counts[method_name] or 0) + 1
+      file.usage = file.usage + 1
+      file.methods_per_byte = file.usage / file.size
     end
   end
 end
@@ -375,19 +403,13 @@ function Usage:add_method (method_name, parsed)
     self.method_to_file_paths[method_name][#self.method_to_file_paths[method_name] + 1] = file_path
   end
 
-  if not self.file_paths[file_path] then
-    local size = string.len(parsed.source)
-    self.file_paths[file_path] = {
-      file_path = file_path,
-      methods = {},
-      methods_per_byte = self.counts[method_name] / size,
-      size = size,
-      usage = self.counts[method_name],
-    }
-  end
-  self.file_paths[file_path].methods[#self.file_paths[file_path].methods + 1] = method_name
-  self.file_paths[file_path].usage = self.file_paths[file_path].usage + self.counts[method_name]
-  self.file_paths[file_path].methods_per_byte = self.file_paths[file_path].usage / self.file_paths[file_path].size
+  local file = self.file_paths[file_path]
+  --if not file.methods[method_name] then
+    file.counts = { [method_name] = 0 }
+    file.usage = file.usage + self.counts[method_name]
+    file.methods[#file.methods+1] = method_name
+    file.methods_per_byte = file.usage / file.size
+  --end
 end
 
 function Usage:serialize(indent)
@@ -457,5 +479,6 @@ end
 
 return {
   repoMap = repoMap,
+  usageFor = usageFor,
   Usage = Usage,
 }

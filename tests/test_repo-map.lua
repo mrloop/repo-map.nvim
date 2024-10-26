@@ -79,6 +79,14 @@ class Template {
     itemCounter(activeTodos) {
     clearCompletedButton(completedTodos) {
 
+deps/todomvc/examples/javascript-es6/src/helpers.js:
+const qs = (selector, scope) => {
+    function dispatchEvent(event) {
+
+deps/todomvc/examples/javascript-es6/src/app.js:
+let todo;
+function Todo(name) {
+
 ]])
 end
 
@@ -105,6 +113,11 @@ export default class View {
 ]])
 end
 
+T['repoMap()']['usage'] = function()
+  local usage = child.lua_get([[M.usageFor('deps/todomvc/examples/javascript-es6/src', 200)]])
+  print(vim.inspect(usage));
+end
+
 local M = require('repo-map')
 local function tmp_file_path()
   local base_filename = os.tmpname()
@@ -117,7 +130,8 @@ T['Usage'] = new_set()
 T['Usage']['save and load'] = function()
   local file_path = tmp_file_path()
   local usage = M.Usage:new()
-  usage:count('my_method')
+  usage:add_file('my-file-path', 0 , 1)
+  usage:count('my_method', { file_path = "my-file-path" })
   usage:save(file_path)
   local usageFromFile = M.Usage.load(file_path)
   eq(1, usageFromFile.counts['my_method'])
