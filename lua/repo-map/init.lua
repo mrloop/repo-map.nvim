@@ -278,15 +278,22 @@ local function collect_usage(parsed, usage)
   end
 end
 
-local function sort_by_field(tbl, field)
+local function sort_by_fields(tbl, ...)
+  local fields = { ... }
   local keys = {}
+  
   for key in pairs(tbl) do
     table.insert(keys, key)
   end
 
-  -- Sort the keys based on the field in the associated value
+  -- Sort the keys based on the provided fields in order of priority
   table.sort(keys, function(a, b)
-    return tbl[a][field] > tbl[b][field]
+    for _, field in ipairs(fields) do
+      if tbl[a][field] ~= tbl[b][field] then
+        return tbl[a][field] > tbl[b][field]
+      end
+    end
+    return false  -- If all specified fields are equal, maintain original order
   end)
 
   -- Iterator function
@@ -333,7 +340,7 @@ local function repoMap(dirpath, max_tokens)
 
   local output = '';
   local estimated_token_total = 0;
-  for file_path in sort_by_field(usage.file_paths, 'methods_per_byte') do
+  for file_path in sort_by_fields(usage.file_paths, 'methods_per_byte', 'size') do
     print(file_path .. usage.file_paths[file_path].methods_per_byte);
     local parsed = parse_file(file_path)
     if parsed and parsed.node then
