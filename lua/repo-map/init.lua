@@ -104,16 +104,6 @@ local function array_contains(arr, val)
   return false
 end
 
-local isMac = vim.loop.os_uname().sysname == "Darwin"
-
-local function getFileModificationTime(filePath)
-  local statCmd = isMac and "stat -f %m " or "stat -c %Y "
-  local f = assert(io.popen(statCmd .. filePath, "r"))
-  local lastModified = f:read("*number")
-  f:close()
-  return lastModified;
-end
-
 local dont_parse = {};
 
 local function parse_file(file_path)
@@ -130,7 +120,14 @@ local function parse_file(file_path)
     if ok then
       local tree = parser:parse()[1]
       local node = tree:root()
-      return { node = node, source = source, language = language, file_path = file_path, modified = getFileModificationTime(file_path) };
+      local stat = vim.loop.fs_stat(file_path)
+      return {
+        node = node,
+        source = source,
+        language = language,
+        file_path = file_path,
+        modified = stat and stat.mtime.sec or 0
+      };
     else
       table.insert(dont_parse, language);
     end
@@ -318,15 +315,14 @@ local Usage = {}
 local function usageFor(dirpath)
   local usage = Usage:new();
   iterate_file_paths_in_dir(dirpath, function(file_path)
-    local modified = getFileModificationTime(file_path)
-    local parsed = parse_file(file_path)
-    local size = 0
+    local stat = vim.loop.fs_stat(file_path)
+    local modified = stat and stat.mtime.sec or 0
+    local size = stat and stat.size or 0
+    usage:add_file(file_path, size, modified)
 
+    local parsed = parse_file(file_path)
     if parsed and parsed.node then
-      usage:add_file(file_path, string.len(parsed.source), modified)
       collect_usage(parsed, usage)
-    else
-      usage:add_file(file_path, size, modified)
     end
   end)
   return usage;
