@@ -319,7 +319,7 @@ end
 
 local Usage = {}
 
-local function usageFor(dirpath)
+local function usageFor(dirpath, oldUsage)
   local usage = Usage:new();
   iterate_file_paths_in_dir(dirpath, function(file_path)
     local stat = vim.loop.fs_stat(file_path)
@@ -327,9 +327,14 @@ local function usageFor(dirpath)
     local size = stat and stat.size or 0
     usage:add_file(file_path, size, modified)
 
-    local parsed = parse_file(file_path)
-    if parsed and parsed.node then
-      collect_usage(parsed, usage)
+    if oldUsage and oldUsage.file_paths[file_path].modified >= modified then
+      -- use cached values   
+      print('cached: ' .. file_path)
+    else
+      local parsed = parse_file(file_path)
+      if parsed and parsed.node then
+        collect_usage(parsed, usage)
+      end
     end
   end)
   return usage;

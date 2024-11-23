@@ -114,7 +114,7 @@ export default class View {
 end
 
 T['repoMap()']['usage'] = function()
-  local usage = child.lua_get([[M.usageFor('deps/todomvc/examples/javascript-es6/src', 200)]])
+  local usage = child.lua_get([[M.usageFor('deps/todomvc/examples/javascript-es6/src')]])
   print(vim.inspect(usage));
 end
 
