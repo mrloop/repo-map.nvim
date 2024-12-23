@@ -111,27 +111,14 @@ local function getFileModificationTime(filePath)
   return lastModified;
 end
 
-local dont_parse = {};
-
-local function parse_file(file_path)
+local function open_file(file_path)
   local file = io.open(file_path, 'r')
   if not file then
     error('Could not open file: ' .. file_path)
   end
   local source = file:read('*all')
   file:close()
-
-  local language = vim.filetype.match({ filename = file_path })
-  if language and not array_contains(dont_parse, language) then
-    local ok, parser = pcall(ts.get_string_parser, source, language);
-    if ok then
-      local tree = parser:parse()[1]
-      local node = tree:root()
-      return { node = node, source = source, language = language, file_path = file_path, modified = getFileModificationTime(file_path) };
-    else
-      table.insert(dont_parse, language);
-    end
-  end
+  return source
 end
 
 -- Function to split a string by a specified separator and handle empty lines
@@ -231,13 +218,6 @@ local function print_info(node, source, context)
   return output;
 end
 
-local function process_file(file_path)
-  local parsed = parse_file(file_path)
-  if parsed and parsed.node then
-    print(print_info(parsed.node, parsed.source))
-  end
-end
-
 local query_string = [[
   (method_definition name: (property_identifier) @method_name)
   (function_declaration name: (identifier) @function_name)
@@ -257,28 +237,6 @@ local function find_first_parent(node, type)
   return nil
 end
 
-local function collect_usage(parsed, usage)
-  -- TODO handle cache
-  if not array_contains(dont_parse, parsed.language) then
-    local ok, query = pcall(ts.query.parse, parsed.language, query_string)
-
-    if ok then
-      for id, node, _ in query:iter_captures(parsed.node, parsed.source, 0, -1) do
-        local method_name = ts.get_node_text(node, parsed.source)
-        local capture_name = query.captures[id]
-
-        if capture_name == "method_name" then
-          usage:add_method(method_name, parsed)
-        elseif capture_name == "function_call" or capture_name == "method_call" then
-          usage:count(method_name, parsed.file_path)
-        end
-      end
-    else
-      table.insert(dont_parse, parsed.language)
-    end
-  end
-end
-
 local function sort_by_field(tbl, field)
   local keys = {}
   for key in pairs(tbl) do
@@ -287,7 +245,11 @@ local function sort_by_field(tbl, field)
 
   -- Sort the keys based on the field in the associated value
   table.sort(keys, function(a, b)
-    return tbl[a][field] > tbl[b][field]
+    if tbl[a][field] == tbl[b][field] then
+      return a < b -- fallback to Lexicographical comparison of keys if fields are equal
+    else
+      return tbl[a][field] > tbl[b][field]
+    end
   end)
 
   -- Iterator function
@@ -313,27 +275,28 @@ end
 
 local Usage = {}
 
-
-local function repoMap(dirpath, max_tokens)
-  local cache_file_path = dirpath .. '/.repo-map-cache'
-  local usage = Usage:new();
-  if vim.loop.fs_stat(cache_file_path) then
-    usage = Usage.load(cache_file_path)
-  end
-
+local function collect_usage_for(dirpath, usage)
+  local copy = vim.deepcopy(usage);
   iterate_file_paths_in_dir(dirpath, function(file_path)
-    local parsed = parse_file(file_path)
-    if parsed and parsed.node then
-      collect_usage(parsed, usage)
+    local modified = getFileModificationTime(file_path);
+    if usage:modified(file_path) ~= modified then
+      local source = open_file(file_path)
+      local parsed = usage:parse_source(file_path, source)
+      if parsed and parsed.node then
+        parsed.modified = modified
+        usage:collect_usage(parsed, copy)
+      end
     end
   end)
+  return usage;
+end
 
-  usage:save(cache_file_path)
-
+local function print_usage(usage, max_tokens)
   local output = '';
   local estimated_token_total = 0;
   for file_path in sort_by_field(usage.file_paths, 'methods_per_byte') do
-    local parsed = parse_file(file_path)
+    local source = open_file(file_path)
+    local parsed = usage:parse_source(file_path, source)
     if parsed and parsed.node then
       local new_output = file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
       estimated_token_total = estimated_token_total + estimate_tokens(new_output)
@@ -347,9 +310,33 @@ local function repoMap(dirpath, max_tokens)
   return output;
 end
 
+local function repoMap(dirpath, max_tokens)
+  local cache_file_path = dirpath .. '/.repo-map-cache'
+
+  local usage = Usage:new();
+  if vim.loop.fs_stat(cache_file_path) then
+    usage = Usage.load(cache_file_path)
+  end
+
+  usage = collect_usage_for(dirpath, usage)
+
+  usage:save(cache_file_path)
+
+  local output = print_usage(usage, max_tokens)
+  return output;
+end
+
 function Usage:new()
   local o = {
-    counts = {}, -- where methods called from - { [method_name] =  { [callee_file_name]: value }
+    dont_parse = {},
+    method_counts = {},
+    -- {
+    --   [method_name] = value
+    -- },
+    callee_file_name_counts = {},
+    -- {
+    --   [callee_file_name] = { [method_name]: value }
+    -- }
     file_paths = { }, --  where method defined - { [file_path] = { methods = [], size = number, usage = number of methods call made  } }
     method_to_file_paths = { }, -- lookup table
   }
@@ -358,35 +345,112 @@ function Usage:new()
   return o;
 end
 
-function Usage:count (method_name, callee_file_path)
-  if not self.counts[method_name] then
-    self.counts[method_name] = { [callee_file_path] =  1 }
-  else
-    self.counts[method_name][callee_file_path] = (self.counts[method_name][callee_file_path] or 0) + 1
+function Usage:process_file(file_path)
+  local parsed = self:parse_source(file_path)
+  if parsed and parsed.node then
+    print(print_info(parsed.node, parsed.source))
   end
-  local file_paths = self.method_to_file_paths[method_name];
+end
 
-  if file_paths then
-    for _, file_path in ipairs(file_paths) do
-      local record = self.file_paths[file_path]
-      record.usage = record.usage + 1
-      record.methods_per_byte = record.usage / record.size
+function Usage:collect_usage(parsed, usage_copy)
+  -- we need to know old cache state before we start updating it
+  -- this is in usage_copy
+  if not array_contains(self.dont_parse, parsed.language) then
+    local ok, query = pcall(ts.query.parse, parsed.language, query_string)
+
+    if ok then
+      -- remove usage_copy values for this file from usage
+      if usage_copy and parsed.file_path then
+        for method_name, count in pairs(usage_copy.callee_file_name_counts[parsed.file_path]) do
+          self:count_reverse(method_name, parsed.file_path, count)
+        end
+      end
+
+      -- add new values
+      for id, node, _ in query:iter_captures(parsed.node, parsed.source, 0, -1) do
+        local method_name = ts.get_node_text(node, parsed.source)
+        local capture_name = query.captures[id]
+
+        if capture_name == "method_name" or capture_name == "function_name" then
+          self:add_method(method_name, parsed)
+        elseif capture_name == "function_call" or capture_name == "method_call" then
+          self:count(method_name, parsed.file_path)
+        end
+      end
+    else
+      -- TODO handle failed parse due to invalid syntax
+      table.insert(self.dont_parse, parsed.language)
     end
   end
 end
 
+function Usage:parse_source(file_path, source)
+  local language = vim.filetype.match({ filename = file_path })
+  if language and not array_contains(self.dont_parse, language) then
+    local ok, parser = pcall(ts.get_string_parser, source, language);
+    if ok then
+      local tree = parser:parse()[1]
+      local node = tree:root()
+      return { node = node, source = source, language = language, file_path = file_path };
+    else
+      table.insert(self.dont_parse, language);
+    end
+  end
+end
+
+function Usage:_update_count(method_name, callee_file_path, value)
+  value = value or 1
+  if not self.method_counts[method_name] then
+    self.method_counts[method_name] = 0
+  end
+  if not self.callee_file_name_counts[callee_file_path] then
+    self.callee_file_name_counts[callee_file_path] = {}
+  end
+  if not self.callee_file_name_counts[callee_file_path][method_name] then
+    self.callee_file_name_counts[callee_file_path][method_name] = 0
+  end
+  self.method_counts[method_name] = self.method_counts[method_name] + value
+  self.callee_file_name_counts[callee_file_path][method_name] = self.callee_file_name_counts[callee_file_path][method_name] + value
+end
+
+-- @usage_copy old copy used to remove cached value before adding count back
+function Usage:count (method_name, callee_file_path)
+  self:_update_count(method_name, callee_file_path)
+  local file_paths = self.method_to_file_paths[method_name];
+  self:update_record_for_file_paths(file_paths, function (record)
+    record.usage = record.usage + 1
+  end)
+end
+
+function Usage:count_reverse(method_name, callee_file_path, count)
+  self:_update_count(method_name, callee_file_path, -count)
+  self:update_record_for_file_paths({callee_file_path}, function (record)
+    record.usage = record.usage - count
+  end)
+end
+
+function Usage:update_record_for_file_paths(file_paths, fn)
+  if file_paths then
+    for _, file_path in ipairs(file_paths) do
+      local record = self.file_paths[file_path]
+      if record then
+        fn(record)
+        record.methods_per_byte = record.usage / record.size
+      end
+    end
+  end
+end
+
+-- @usage_copy old copy used to remove cached value before adding method back
 function Usage:add_method (method_name, parsed)
   local file_path = parsed.file_path;
-  if not self.counts[method_name] then
-    self.counts[method_name] = {}
-  end
   if not self.method_to_file_paths[method_name] then
     self.method_to_file_paths[method_name] = {file_path}
   elseif not array_contains(self.method_to_file_paths[method_name], file_path) then
     self.method_to_file_paths[method_name][#self.method_to_file_paths[method_name] + 1] = file_path
   end
 
-  local total_count = self:total_count_for_method(method_name)
+  local total_count = self.method_counts[method_name] or 0
   if not self.file_paths[file_path] then
     local size = string.len(parsed.source)
     self.file_paths[file_path] = {
@@ -400,14 +464,13 @@ function Usage:add_method (method_name, parsed)
   self.file_paths[file_path].methods[#self.file_paths[file_path].methods + 1] = method_name
   self.file_paths[file_path].usage = self.file_paths[file_path].usage + total_count
   self.file_paths[file_path].methods_per_byte = self.file_paths[file_path].usage / self.file_paths[file_path].size
+  self.file_paths[file_path].modified = parsed.modified
 end
 
-function Usage:total_count_for_method(method_name)
-  local total = 0
-  for k, v in pairs(self.counts[method_name]) do
-    total = total + self.counts[method_name][k]
+function Usage:modified(file_path)
+  if self.file_paths[file_path] then
+    return self.file_paths[file_path].modified
   end
-  return total
 end
 
 function Usage:serialize(indent)
@@ -458,8 +521,8 @@ function Usage.load(file_path)
     local data = file:read('*all')
     file:close();
     local result = usage:deserialize(data);
-
-    usage.counts = result.counts;
+    usage.method_counts = result.method_counts;
+    usage.callee_file_name_counts = result.callee_file_name_counts;
     usage.file_paths = result.file_paths;
     usage.method_to_file_paths = {}
   end

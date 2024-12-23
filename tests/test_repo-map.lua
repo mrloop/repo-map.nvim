@@ -79,6 +79,14 @@ class Template {
     itemCounter(activeTodos) {
     clearCompletedButton(completedTodos) {
 
+deps/todomvc/examples/javascript-es6/src/app.js:
+let todo;
+function Todo(name) {
+
+deps/todomvc/examples/javascript-es6/src/helpers.js:
+const qs = (selector, scope) => {
+    function dispatchEvent(event) {
+
 ]])
 end
 
@@ -120,7 +128,79 @@ T['Usage']['save and load'] = function()
   usage:count('my_method', 'my_test_file.lua')
   usage:save(file_path)
   local usageFromFile = M.Usage.load(file_path)
-  eq({ ['my_test_file.lua'] = 1}, usageFromFile.counts['my_method'])
+  eq({ ['my_method'] = 1}, usageFromFile.method_counts)
+  eq({ ['my_test_file.lua']={ ['my_method']=1 } }, usageFromFile.callee_file_name_counts)
+end
+
+T['Usage']['collect_usage'] = function()
+  local usage = M.Usage:new()
+  local parsed = usage:parse_source('a.js', [[
+    import { ba, bb }  from './b.js'
+    function aa() { ba() }
+    function ab() { bb() }
+  ]])
+  usage:collect_usage(parsed)
+  parsed = usage:parse_source('b.js', [[
+    function ba() {}
+    function bb() { ba() }
+    export { ba, bb }
+  ]])
+  usage:collect_usage(parsed)
+  eq({
+    ['a.js'] = {['ba'] = 1, ['bb'] = 1},
+    ['b.js'] = {['ba'] = 1}
+  },usage.callee_file_name_counts);
+  eq({
+    ba = 2,
+    bb = 1
+  }, usage.method_counts)
+  eq({
+    aa = {'a.js'},
+    ab = {'a.js'},
+    ba = {'b.js'},
+    bb = {'b.js'}
+  },usage.method_to_file_paths)
+end
+
+T['Usage']['collect_usage where parsed contents have changed'] = function()
+  local usage = M.Usage:new()
+  local parsed = usage:parse_source('a.js', [[
+    import { ba, bb }  from './b.js'
+    function aa() { ba() }
+    function ab() { bb() }
+  ]])
+  usage:collect_usage(parsed)
+  parsed = usage:parse_source('b.js', [[
+    function ba() {}
+    function bb() { ba() }
+    export { ba, bb }
+  ]])
+  usage:collect_usage(parsed)
+  local copy = vim.deepcopy(usage);
+
+  parsed = usage:parse_source('b.js', [[
+    function ba() { bb() }
+    function bb() { aa() }
+    export { ba, bb }
+  ]])
+  usage:collect_usage(parsed, copy)
+
+
+  eq({
+    ['a.js'] = {['ba'] = 1, ['bb'] = 1},
+    ['b.js'] = {['aa'] = 1, ['ba'] = 0, ['bb'] = 1}
+  },usage.callee_file_name_counts);
+  eq({
+    aa = 1,
+    ba = 1,
+    bb = 2
+  }, usage.method_counts)
+  eq({
+    aa = {'a.js'},
+    ab = {'a.js'},
+    ba = {'b.js'},
+    bb = {'b.js'}
+  },usage.method_to_file_paths)
 end
 
 return T;
