@@ -258,6 +258,7 @@ local function find_first_parent(node, type)
 end
 
 local function collect_usage(parsed, usage)
+  -- TODO handle cache
   if not array_contains(dont_parse, parsed.language) then
     local ok, query = pcall(ts.query.parse, parsed.language, query_string)
 
@@ -312,14 +313,22 @@ end
 
 local Usage = {}
 
+
 local function repoMap(dirpath, max_tokens)
+  local cache_file_path = dirpath .. '/.repo-map-cache'
   local usage = Usage:new();
+  if vim.loop.fs_stat(cache_file_path) then
+    usage = Usage.load(cache_file_path)
+  end
+
   iterate_file_paths_in_dir(dirpath, function(file_path)
     local parsed = parse_file(file_path)
     if parsed and parsed.node then
       collect_usage(parsed, usage)
     end
   end)
+
+  usage:save(cache_file_path)
 
   local output = '';
   local estimated_token_total = 0;
@@ -340,10 +349,9 @@ end
 
 function Usage:new()
   local o = {
-    counts = {}, -- { method_name { file_name: value }
-    -- default nil to collect yet to be seen classes / methods
-    file_paths = { },
-    method_to_file_paths = { },
+    counts = {}, -- where methods called from - { [method_name] =  { [callee_file_name]: value }
+    file_paths = { }, --  where method defined - { [file_path] = { methods = [], size = number, usage = number of methods call made  } }
+    method_to_file_paths = { }, -- lookup table
   }
   setmetatable(o, self)
   self.__index = self
