@@ -104,7 +104,7 @@ local function array_contains(arr, val)
   return false
 end
 
-local function getFileModificationTime(filePath)
+local function file_modification_time(filePath)
   local f = assert(io.popen("stat -c %Y " .. filePath, "r"))
   local lastModified = f:read("*number")
   f:close()
@@ -175,49 +175,6 @@ local function get_text(nodes, source)
   return nil
 end
 
--- Function to recursively traverse and print the desired nodes
--- http://neovim.io/doc/user/treesitter.html#treesitter-node
--- https://github.com/tree-sitter/tree-sitter
-local function print_info(node, source, context)
-  context = context or {}
-
-  local node_type = node:type()
-  local output = '';
-
-  local nodes = {};
-
-  if node_type == 'class_declaration' then
-    nodes = {node:field('name')[1]}
-    context.in_class = true;
-
-  elseif node_type == 'field_definition' then
-    nodes = {node:field('property')[1], node:field('value')[1]}
-
-  elseif node_type == 'function_declaration' then
-    nodes = {node:field('name')[1], node:field('parameters')[1]}
-    context.in_function = true;
-
-  elseif node_type == 'method_definition' then
-    nodes = {node:field('name')[1], node:field('parameters')[1]}
-    context.in_method = true;
-
-  elseif node_type == 'variable_declarator' and not context.in_function and not context.in_method and not context.in_variable then
-    nodes = {node:field('name')[1]}
-    context.in_variable = true;
-  end
-
-  local text = get_text(nodes, source)
-  if text then
-    output = output .. text .. '\n'
-  end
-
-  -- Recursively print child nodes
-  for child in node:iter_children() do
-    output = output .. print_info(child, source, context)
-  end
-  return output;
-end
-
 local query_string = [[
   (method_definition name: (property_identifier) @method_name)
   (function_declaration name: (identifier) @function_name)
@@ -278,7 +235,7 @@ local Usage = {}
 local function collect_usage_for(dirpath, usage)
   local copy = vim.deepcopy(usage);
   iterate_file_paths_in_dir(dirpath, function(file_path)
-    local modified = getFileModificationTime(file_path);
+    local modified = file_modification_time(file_path);
     if usage:modified(file_path) ~= modified then
       local source = open_file(file_path)
       local parsed = usage:parse_source(file_path, source)
@@ -291,26 +248,8 @@ local function collect_usage_for(dirpath, usage)
   return usage;
 end
 
-local function print_usage(usage, max_tokens)
-  local output = '';
-  local estimated_token_total = 0;
-  for file_path in sort_by_field(usage.file_paths, 'methods_per_byte') do
-    local source = open_file(file_path)
-    local parsed = usage:parse_source(file_path, source)
-    if parsed and parsed.node then
-      local new_output = file_path .. ':\n' .. print_info(parsed.node, parsed.source) .. '\n'
-      estimated_token_total = estimated_token_total + estimate_tokens(new_output)
-      if max_tokens and estimated_token_total > max_tokens then
-        return output
-      end
-      output = output .. new_output
-    end
-  end
-
-  return output;
-end
-
-local function repoMap(dirpath, max_tokens)
+local function repoMap(dirpath, options)
+  options = options or {}
   local cache_file_path = dirpath .. '/.repo-map-cache'
 
   local usage = Usage:new();
@@ -322,8 +261,7 @@ local function repoMap(dirpath, max_tokens)
 
   usage:save(cache_file_path)
 
-  local output = print_usage(usage, max_tokens)
-  return output;
+  return usage:print(options);
 end
 
 function Usage:new()
@@ -345,10 +283,73 @@ function Usage:new()
   return o;
 end
 
+function Usage:print(options)
+  local output = '';
+  local estimated_token_total = 0;
+  local file_seperator = options.file_seperator or ''
+  for file_path in sort_by_field(self.file_paths, 'methods_per_byte') do
+    local source = open_file(file_path)
+    local parsed = self:parse_source(file_path, source)
+    if parsed and parsed.node then
+      local new_output = file_seperator .. file_path .. ':\n' .. self:print_info(parsed.node, parsed.source) .. '\n'
+      estimated_token_total = estimated_token_total + estimate_tokens(new_output)
+      if options.max_tokens and estimated_token_total > options.max_tokens then
+        return output
+      end
+      output = output .. new_output
+    end
+  end
+
+  return output;
+end
+
+-- Function to recursively traverse and print the desired nodes
+-- http://neovim.io/doc/user/treesitter.html#treesitter-node
+-- https://github.com/tree-sitter/tree-sitter
+function Usage:print_info(node, source, context)
+  context = context or {}
+
+  local node_type = node:type()
+  local output = '';
+
+  local nodes = {};
+
+  if node_type == 'class_declaration' then
+    nodes = {node:field('name')[1]}
+    context.in_class = true;
+
+  elseif node_type == 'field_definition' then
+    nodes = {node:field('property')[1], node:field('value')[1]}
+
+  elseif node_type == 'function_declaration' then
+    nodes = {node:field('name')[1], node:field('parameters')[1]}
+    context.in_function = true;
+
+  elseif node_type == 'method_definition' then
+    nodes = {node:field('name')[1], node:field('parameters')[1]}
+    context.in_method = true;
+
+  elseif node_type == 'variable_declarator' and not context.in_function and not context.in_method and not context.in_variable then
+    nodes = {node:field('name')[1]}
+    context.in_variable = true;
+  end
+
+  local text = get_text(nodes, source)
+  if text then
+    output = output .. text .. '\n'
+  end
+
+  -- Recursively print child nodes
+  for child in node:iter_children() do
+    output = output .. self:print_info(child, source, context)
+  end
+  return output;
+end
+
 function Usage:process_file(file_path)
   local parsed = self:parse_source(file_path)
   if parsed and parsed.node then
-    print(print_info(parsed.node, parsed.source))
+    print(self:print_info(parsed.node, parsed.source))
   end
 end
 
@@ -360,7 +361,7 @@ function Usage:collect_usage(parsed, usage_copy)
 
     if ok then
       -- remove usage_copy values for this file from usage
-      if usage_copy and parsed.file_path then
+      if usage_copy and parsed.file_path and usage_copy.callee_file_name_counts[parsed.file_path] then
         for method_name, count in pairs(usage_copy.callee_file_name_counts[parsed.file_path]) do
           self:count_reverse(method_name, parsed.file_path, count)
         end
