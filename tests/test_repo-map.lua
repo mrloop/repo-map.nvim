@@ -25,7 +25,7 @@ T['repoMap()'] = new_set()
 
 T['repoMap()']['works'] = function()
   eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src')]]), [[
-deps/todomvc/examples/javascript-es6/src/model.js:
+deps/todomvc/examples/javascript-es6/src/model.js
 class Model {
     constructor(storage) {
     create(title, callback) {
@@ -35,7 +35,7 @@ class Model {
     removeAll(callback) {
     getCount(callback) {
 
-deps/todomvc/examples/javascript-es6/src/view.js:
+deps/todomvc/examples/javascript-es6/src/view.js
 const ENTER_KEY = 13;
 export default class View {
     constructor(template) {
@@ -43,7 +43,7 @@ export default class View {
     render(viewCmd, parameter) {
     bindCallback(event, handler) {
 
-deps/todomvc/examples/javascript-es6/src/controller.js:
+deps/todomvc/examples/javascript-es6/src/controller.js
 class Controller {
     constructor(model, view) {
     setView(hash) {
@@ -62,7 +62,7 @@ class Controller {
     _filter(force) {
     _updateFilter(currentPage) {
 
-deps/todomvc/examples/javascript-es6/src/store.js:
+deps/todomvc/examples/javascript-es6/src/store.js
 let uniqueID = 1;
 export class Store {
     constructor(name, callback) {
@@ -72,18 +72,18 @@ export class Store {
     remove(id, callback) {
     drop(callback) {
 
-deps/todomvc/examples/javascript-es6/src/template.js:
+deps/todomvc/examples/javascript-es6/src/template.js
 const htmlEscapes = {
 class Template {
     show(data) {
     itemCounter(activeTodos) {
     clearCompletedButton(completedTodos) {
 
-deps/todomvc/examples/javascript-es6/src/app.js:
+deps/todomvc/examples/javascript-es6/src/app.js
 let todo;
 function Todo(name) {
 
-deps/todomvc/examples/javascript-es6/src/helpers.js:
+deps/todomvc/examples/javascript-es6/src/helpers.js
 const qs = (selector, scope) => {
     function dispatchEvent(event) {
 
@@ -92,7 +92,7 @@ end
 
 T['repoMap()']['max_tokens'] = function()
   eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src', { max_tokens = 200})]]), [[
-deps/todomvc/examples/javascript-es6/src/model.js:
+deps/todomvc/examples/javascript-es6/src/model.js
 class Model {
     constructor(storage) {
     create(title, callback) {
@@ -102,7 +102,7 @@ class Model {
     removeAll(callback) {
     getCount(callback) {
 
-deps/todomvc/examples/javascript-es6/src/view.js:
+deps/todomvc/examples/javascript-es6/src/view.js
 const ENTER_KEY = 13;
 export default class View {
     constructor(template) {
@@ -115,7 +115,7 @@ end
 
 T['repoMap()']['max_tokens & file_seperator'] = function()
   eq(child.lua_get([[M.repoMap('deps/todomvc/examples/javascript-es6/src', { max_tokens = 200, file_seperator = '<|file_sep|>'})]]), [[
-<|file_sep|>deps/todomvc/examples/javascript-es6/src/model.js:
+<|file_sep|>deps/todomvc/examples/javascript-es6/src/model.js
 class Model {
     constructor(storage) {
     create(title, callback) {
@@ -125,7 +125,7 @@ class Model {
     removeAll(callback) {
     getCount(callback) {
 
-<|file_sep|>deps/todomvc/examples/javascript-es6/src/view.js:
+<|file_sep|>deps/todomvc/examples/javascript-es6/src/view.js
 const ENTER_KEY = 13;
 export default class View {
     constructor(template) {

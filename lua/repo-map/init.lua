@@ -264,6 +264,53 @@ local function repoMap(dirpath, options)
   return usage:print(options);
 end
 
+local usage
+local dir_path
+local collect_usage_for_running = false
+
+local function root_dir()
+  local git_root = vim.fn.system("git rev-parse --show-toplevel")
+  if vim.v.shell_error == 0 then
+    return vim.fn.trim(git_root) -- Git root directory
+  else
+    return vim.fn.getcwd() -- Current working directory
+  end
+end
+
+local function content_to_cursor()
+  local buf = vim.api.nvim_get_current_buf()
+
+  local cursor_position = vim.api.nvim_win_get_cursor(0)
+  local row = cursor_position[1] -- 1-based
+  local col = cursor_position[2] -- 0-based
+
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, row, false)
+
+  if #lines > 0 and col > 0 then
+    lines[#lines] = lines[#lines]:sub(1, col)
+  end
+
+  local file_name = vim.api.nvim_buf_get_name(buf)
+  local content = table.concat(lines, "\n")
+  return { file_name = file_name, lines = content }
+end
+
+local function prompt(options)
+  if not usage then
+    usage = Usage:new()
+    dir_path = root_dir()
+  end
+  if not collect_usage_for_running then
+    collect_usage_for_running = true
+    local status = pcall(collect_usage_for, dir_path, usage)
+    collect_usage_for_running = false
+  end
+
+  options = vim.deepcopy(options)
+  options.content_to_cursor = content_to_cursor()
+  return usage:print(options)
+end
+
 function Usage:new()
   local o = {
     dont_parse = {},
@@ -284,23 +331,34 @@ function Usage:new()
 end
 
 function Usage:print(options)
+  options.content_to_cursor = options.content_to_cursor or { file_name = '', lines = '' }
   local output = '';
-  local estimated_token_total = 0;
+  local prefix = options.prefix or ''
+  local estimated_token_total = string.len(prefix) +  estimate_tokens(options.content_to_cursor.lines);
   local file_seperator = options.file_seperator or ''
   for file_path in sort_by_field(self.file_paths, 'methods_per_byte') do
-    local source = open_file(file_path)
-    local parsed = self:parse_source(file_path, source)
-    if parsed and parsed.node then
-      local new_output = file_seperator .. file_path .. ':\n' .. self:print_info(parsed.node, parsed.source) .. '\n'
-      estimated_token_total = estimated_token_total + estimate_tokens(new_output)
-      if options.max_tokens and estimated_token_total > options.max_tokens then
-        return output
+    if file_path ~= options.content_to_cursor.file_name then
+      local source = open_file(file_path)
+      local parsed = self:parse_source(file_path, source)
+      if parsed and parsed.node then
+        local new_output = self:print_content(file_seperator, file_path, self:print_info(parsed.node, parsed.source))
+        estimated_token_total = estimated_token_total + estimate_tokens(new_output)
+        if options.max_tokens and estimated_token_total > options.max_tokens then
+          return output
+        end
+        output = output .. new_output
       end
-      output = output .. new_output
     end
   end
+  if options.content_to_cursor.lines ~= '' then
+    output = output .. self:print_content(file_seperator, options.content_to_cursor.file_name, options.content_to_cursor.lines)
+  end
 
-  return output;
+  return prefix .. output;
+end
+
+function Usage:print_content(file_seperator, file_path, content)
+  return file_seperator .. file_path .. '\n' .. content .. '\n'
 end
 
 -- Function to recursively traverse and print the desired nodes
@@ -414,7 +472,6 @@ function Usage:_update_count(method_name, callee_file_path, value)
   self.callee_file_name_counts[callee_file_path][method_name] = self.callee_file_name_counts[callee_file_path][method_name] + value
 end
 
--- @usage_copy old copy used to remove cached value before adding count back
 function Usage:count (method_name, callee_file_path)
   self:_update_count(method_name, callee_file_path)
   local file_paths = self.method_to_file_paths[method_name];
@@ -442,7 +499,6 @@ function Usage:update_record_for_file_paths(file_paths, fn)
   end
 end
 
--- @usage_copy old copy used to remove cached value before adding method back
 function Usage:add_method (method_name, parsed)
   local file_path = parsed.file_path;
   if not self.method_to_file_paths[method_name] then
@@ -516,18 +572,18 @@ end
 
 -- Usage.load('my_file_path');
 function Usage.load(file_path)
-  local usage = Usage:new();
+  local u = Usage:new();
   local file = io.open(file_path, 'r')
   if file then
     local data = file:read('*all')
     file:close();
-    local result = usage:deserialize(data);
-    usage.method_counts = result.method_counts;
-    usage.callee_file_name_counts = result.callee_file_name_counts;
-    usage.file_paths = result.file_paths;
-    usage.method_to_file_paths = {}
+    local result = u:deserialize(data);
+    u.method_counts = result.method_counts;
+    u.callee_file_name_counts = result.callee_file_name_counts;
+    u.file_paths = result.file_paths;
+    u.method_to_file_paths = {}
   end
-  return usage;
+  return u;
 end
 
 function Usage:save(file_path)
@@ -541,5 +597,6 @@ end
 
 return {
   repoMap = repoMap,
+  prompt = prompt,
   Usage = Usage,
 }
